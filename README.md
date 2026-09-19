@@ -21,7 +21,7 @@ Topologi dibangun di GNS3 menggunakan image Docker debinet untuk seluruh node. (
 
 ![topologi](screenshots/topologi.png)
 
-Interface router: eth0→NAT1, eth1→Switch1, eth2→Switch2, eth3→Switch3.
+Interface router: eth0->NAT1, eth1->Switch1, eth2->Switch2, eth3->Switch3.
 
 ### Skema Pengalamatan IP (prefix 192.245)
 
@@ -65,7 +65,7 @@ Verifikasi: Pemetaan interface router dicek melalui label link di GNS3 dan perin
 
 ## Soal 2 
 
-Langkah: Melalui menu Configure → Network configuration pada node Lain di GNS3, interface eth0 diatur sebagai DHCP client (iface eth0 inet dhcp). Berbeda dengan eth1–eth3 yang memakai IP statis, eth0 memakai DHCP karena alamatnya disediakan langsung oleh NAT. Konfigurasi otomatis diterapkan saat node dijalankan.
+Langkah: Melalui menu Configure -> Network configuration pada node Lain di GNS3, interface eth0 diatur sebagai DHCP client (iface eth0 inet dhcp). Berbeda dengan eth1–eth3 yang memakai IP statis, eth0 memakai DHCP karena alamatnya disediakan langsung oleh NAT. Konfigurasi otomatis diterapkan saat node dijalankan.
 
 
 ~~~
@@ -495,6 +495,7 @@ Hasil pengujian:
 - Ukuran tiap frame 170 byte (128 payload + 8 header ICMP + 20 header IP + 14 header Ethernet), dan balasan memiliki **ttl=63** yang menandakan paket melewati satu router.
 
 ![Ping 77 paket loss 0% dan detail ICMP type/code](screenshots/soal10_knights_start.png)
+
 ![Ping 77 paket loss 0% dan detail ICMP type/code](screenshots/soal10_knights_end.png)
 ![Ping 77 paket loss 0% dan detail ICMP type/code](screenshots/soal10_knights_wireshark.png)
 
@@ -538,6 +539,18 @@ Hasil analisis di Wireshark dengan **Follow TCP Stream**:
 
 Node Knights membuka dua port layanan: port 22 (SSH, via `service ssh start`) dan port 80 (via `nc -lk -p 80`), sementara port 7777 sengaja dibiarkan tertutup. Dari Alice dilakukan pemindaian port menggunakan netcat, sambil trafik disadap pada link Alice -> Switch1:
 
+Install ssh di Knights:
+~~~
+apt update && apt install -y openssh-server
+service ssh start
+~~~
+
+Open port 80 di Knights:
+~~~
+nc -lk -p 80
+~~~
+
+netcat di alice:
 ~~~
 nc -zv 192.245.3.2 22 80 7777
 ~~~
@@ -546,8 +559,8 @@ Keterangan: `-z` melakukan scan tanpa mengirim data (zero-I/O), `-v` menampilkan
 
 Hasil analisis TCP flags di Wireshark:
 
-- **Port 22 dan 80 (terbuka)** → server membalas dengan **SYN, ACK** (Flags `0x012`), menandakan port siap menerima koneksi (three-way handshake berlanjut).
-- **Port 7777 (tertutup)** → server membalas dengan **RST, ACK** (Flags `0x014`), yang langsung memutus percobaan koneksi.
+- **Port 22 dan 80 (terbuka)** -> server membalas dengan **SYN, ACK** (Flags `0x012`), menandakan port siap menerima koneksi (three-way handshake berlanjut).
+- **Port 7777 (tertutup)** -> server membalas dengan **RST, ACK** (Flags `0x014`), yang langsung memutus percobaan koneksi.
 
 Perbedaan intinya: port terbuka menyelesaikan handshake (SYN-ACK), sedangkan port tertutup menolak seketika (RST-ACK). Sebagai bonus, terlihat pula banner `SSH-2.0-OpenSSH_10.0p2` dari port 22.
 
@@ -559,10 +572,46 @@ Perbedaan intinya: port terbuka menyelesaikan handshake (SYN-ACK), sedangkan por
 
 Node Knights menjalankan SSH server (openssh-server) dengan user `mika_admin`, dikonfigurasi hanya menerima autentikasi kunci (`PasswordAuthentication no` pada `/etc/ssh/sshd_config`). Dari Mika dibuat pasangan kunci dengan `ssh-keygen -t rsa -b 2048`, lalu kunci publik disalin ke Knights menggunakan `ssh-copy-id` (private key tetap di Mika). Koneksi SSH kemudian dilakukan sambil disadap pada link Mika -> Switch1:
 
+Install SSH dulu di konsol Knights:
 ~~~
-ssh-keygen -t rsa -b 2048          # di Mika
-ssh-copy-id mika_admin@192.245.3.2 # salin public key ke Knights
-ssh mika_admin@192.245.3.2         # login TANPA password
+apt update && apt install -y openssh-server
+service ssh start
+~~~
+
+Buat user mika_admin:
+~~~
+useradd -m mika_admin
+passwd mika_admin        #mika123
+~~~
+
+Pindah ke konsol mika dan buat key:
+~~~
+ssh-keygen -t rsa -b 2048     
+~~~
+
+`-t rsa` type = rsa dan `-b 2048` panjang key = 2048 bit
+
+Hapus known host sebelumnya kalau Knights direstart/reinstall:
+~~~
+ssh-keygen -f '/root/.ssh/known_hosts' -R '192.245.3.2'
+~~~
+
+Salin public key mika dan masukkan password tadi:
+~~~
+ssh-copy-id mika_admin@192.245.3.2
+~~~
+
+Pindah ke konsol Knights dan disable password authentication:
+
+~~~
+sed -i 's/^#*PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
+service ssh restart
+~~~
+
+Pindak ke konsol Mika dan login, harusnya tanpa password:
+
+~~~
+ssh mika_admin@192.245.3.2 
 ~~~
 
 Hasil analisis di Wireshark:
@@ -571,7 +620,9 @@ Hasil analisis di Wireshark:
 - **Key Exchange**: terlihat paket Key Exchange Init, lalu PQ/T Hybrid Key Exchange, dan diakhiri New Keys.
 - Setelah tahap **New Keys**, seluruh paket berikutnya tampil sebagai **Encrypted Packet** isi sesi tidak dapat dibaca.
 
-Berbeda dengan Telnet (soal 11) yang menampilkan kredensial plaintext, sesi SSH tidak menampilkan username maupun password karena: (1) seluruh trafik terenkripsi setelah proses Key Exchange, dan (2) autentikasi memakai pasangan kunci private key tidak pernah dikirim melalui jaringan, hanya digunakan untuk membuktikan kepemilikan secara kriptografis.
+Berbeda dengan Telnet (soal 11) yang menampilkan kredensial plaintext, sesi SSH tidak menampilkan username maupun password karena: 
+- (1) seluruh trafik terenkripsi setelah proses Key Exchange
+- (2) autentikasi memakai pasangan kunci private key tidak pernah dikirim melalui jaringan, hanya digunakan untuk membuktikan kepemilikan secara kriptografis.
 
 ![Analisis SSH: version exchange, key exchange, dan paket terenkripsi](screenshots/soal13.png)
 
@@ -583,11 +634,11 @@ analisis dari `soal14_wired_bruteforce.pcapng` untuk mengidentifikasi serangan b
 
 **Metode analisis (Wireshark):**
 
-1. Menyaring seluruh percobaan login dengan filter request POST:
+1. Menyaring seluruh percobaan login dengan filter `http.request`:
    ~~~
-   http.request.method == "POST"
+   http.request
    ~~~
-2. Menambahkan kolom **User-Agent** (klik kanan field `http.user_agent` → Apply as Column) untuk melihat tool yang dipakai tiap request.
+2. Menambahkan kolom **User-Agent** (klik kanan field `http.user_agent` -> Apply as Column) untuk melihat tool yang dipakai tiap request.
 3. Penyerang diidentifikasi sebagai IP yang **membanjiri** endpoint `POST /login.php` dengan ratusan percobaan memakai User-Agent tool brute-force. Beberapa IP lain yang hanya mengirim satu paket merupakan **decoy** dan bukan pelaku sebenarnya.
 4. Menyaring respons yang berhasil untuk menemukan kredensial yang tembus:
    ~~~
@@ -612,6 +663,8 @@ analisis dari `soal14_wired_bruteforce.pcapng` untuk mengidentifikasi serangan b
 - `172.26.7.92` User-Agent `masscan/1.3`
 
 **Validasi:** hasil dikonfirmasi ke server praktikum dengan `nc 10.4.89.250 3401`, dan flag berhasil diperoleh:
+
+![Banjir POST /login.php dari 172.26.7.50 dengan User-Agent ffuf](screenshots/soal14_flag.png)
 
 ~~~
 KOMJAR26{W1r3d_Brut3_ofGWOszZFdRWl2gbaXEJsvORj}
@@ -701,7 +754,7 @@ Trafik disaring dengan filter `smb2` untuk melacak transfer file executable mela
 | Protokol | SMB (SMB2) |
 | IP pengirim (attacker) | `10.7.3.100` |
 | IP penerima (victim) | `10.7.1.50` |
-| Folder tujuan | `ADMIN$` → `System32` |
+| Folder tujuan | `ADMIN$` -> `System32` |
 | Nama file executable | `wired_trojan_payload.exe` |
 | Flag validasi | `KOMJAR26{SMB_Tr4nsf3r_Tssoap3oiw7cU1I0Eq7fldJSv}` |
 
@@ -736,7 +789,7 @@ Trafik disaring dengan filter `smtp`, lalu Follow TCP Stream untuk membaca isi e
 
 ## Soal 20 — TLS decrypt (`wired_tls_decrypt.pcapng` + `keyslogfile.txt`) — validasi nc port 3407
 
-Dekripsi diaktifkan dengan memasukkan `keyslogfile.txt` ke Wireshark (Edit → Preferences → Protocols → TLS → (Pre)-Master-Secret log filename). Setelah trafik terdekripsi, isi HTTP di dalam TLS dapat dibaca.
+Dekripsi diaktifkan dengan memasukkan `keyslogfile.txt` ke Wireshark (Edit -> Preferences -> Protocols -> TLS -> (Pre)-Master-Secret log filename). Setelah trafik terdekripsi, isi HTTP di dalam TLS dapat dibaca.
 
 | Temuan | Nilai |
 |---|---|
